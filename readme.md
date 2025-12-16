@@ -40,3 +40,42 @@ The system is designed as a distributed application with three core components:
 ```bash
 git clone [https://github.com/shasank123/LangGraph-Invoice-Agent.git](https://github.com/shasank123/LangGraph-Invoice-Agent.git)
 cd LangGraph-Invoice-Agent
+
+### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
+
+🏃‍♂️ How to Run the Demo
+Since this is a distributed system, you need to run 3 separate terminal windows:
+
+Terminal 1: Start the MCP Servers 
+python servers.py #Bash
+# Output: ✅ MCP Servers started on Ports 8001 & 8002
+
+Terminal 2: Start the Backend API
+python api.py #Bash
+# Output: Uvicorn running on [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+Terminal 3: Start the Frontend UI
+streamlit run frontend.py #Bash The UI will open automatically at http://localhost:8501
+
+🧪 Demo Scenarios
+Scenario 1: The Happy Path (Auto-Approval)
+1.Select good_invoice.pdf in the sidebar.
+2.Click Process.
+3.Result: The agent matches the invoice ($5000) with the PO ($5000) and completes automatically.
+
+Scenario 2: Human-in-the-Loop (Variance Detected)
+1.Select bad_invoice.pdf in the sidebar.
+2.Click Process.
+3.Result: The agent detects a mismatch ($5500 vs $5000) and PAUSES at Stage 6.
+4.The UI shows a "Human Intervention Required" alert.
+5.Enter a reason (e.g., "Approved shipping variance") and click Approve.
+6.The Agent resumes and finishes the workflow.
+
+🛠️ Technology Stack
+Orchestration: LangGraph 
+API Framework: FastAPI
+Frontend: Streamlit
+Database: SQLite (for ERP simulation and Checkpointing) 
+Protocols: MCP (Model Context Protocol)
