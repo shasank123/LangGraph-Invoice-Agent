@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+langgraph
+langchain
+langchain-core
+pydantic
+streamlit
+python-multipart
+requests
