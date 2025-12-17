@@ -8,3 +8,5 @@ pydantic
 streamlit
 python-multipart
 requests
+langchain-openai
+python-dotenv

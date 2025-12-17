@@ -97,7 +97,11 @@ with col2:
     if st.session_state.status == "PAUSED_HITL":
         st.divider()
         st.warning("🛑 **Action Required: Stage 6 (Checkpoint)**")
-        st.write("The agent detected a discrepancy in Stage 5.")
+
+        # --- NEW: AI ANALYSIS BOX (V2 FEATURE) ---
+        ai_msg = st.session_state.data.get("ai_analysis", "No analysis available")
+        st.info(f"🤖 **AI Recommendation:** {ai_msg}")
+        # -----------------------------------------
         
         # Display Data for Decision
         curr_data = st.session_state.data
@@ -126,9 +130,9 @@ with col2:
 
                 with st.spinner("Resuming Workflow..."):
                     try:
-                        # UPDATED TO MATCH PDF SPEC API
+                        # Call Decision Endpoint
                         resp = requests.post(f"{API_URL}/human-review/decision", json={
-                            "checkpoint_id": st.session_state.thread_id, # Mapping thread_id to checkpoint_id
+                            "checkpoint_id": st.session_state.thread_id,
                             "decision": action,
                             "notes": note
                         })
