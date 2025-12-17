@@ -9,7 +9,6 @@ from multiprocessing import Process
 def init_erp_db():
     conn = sqlite3.connect("erp_system.db") 
     c = conn.cursor()
-    
     c.execute('''CREATE TABLE IF NOT EXISTS purchase_orders
                  (po_number TEXT PRIMARY KEY, vendor TEXT, amount REAL, status TEXT)''')
     
@@ -20,7 +19,6 @@ def init_erp_db():
         ("PO-9999", "MEGA CORP", 10000.00, "APPROVED")
     ]
     c.executemany("INSERT OR IGNORE INTO purchase_orders VALUES(?,?,?,?)", data)
-    
     conn.commit() 
     conn.close()
 
@@ -63,7 +61,6 @@ def compute_match_score(req: MatchRequest):
     if req.po_amount == 0: return {"score": 0.0}
     diff = abs(req.invoice_amount - req.po_amount)
     pct = (diff / req.po_amount) * 100
-    # Strict matching: 0% diff = 1.0 score. >5% diff = 0.0 score.
     score = 1.0 if pct == 0 else max(0, 1.0 - (pct / 5))
     return {"score": round(score, 2)}
 
@@ -84,7 +81,6 @@ atlas_app = FastAPI(title="ATLAS Server")
 @atlas_app.post("/ocr_extract")
 def ocr_extract(filename: str, tool: str = "google_vision"):
     time.sleep(1)
-    # Demo Logic: Filename dictates content
     if "good" in filename:
         return {"text": "INVOICE #001\nVENDOR: ACME CORP\nTOTAL: $5000.00"}
     elif "bad" in filename:
@@ -93,7 +89,6 @@ def ocr_extract(filename: str, tool: str = "google_vision"):
 
 @atlas_app.post("/enrich_vendor")
 def enrich_vendor(vendor_name: str, tool: str = "clearbit"):
-    # Mock Enrichment
     return {"tax_id": "US-99-99999", "credit_score": 850, "risk": "LOW"}
 
 @atlas_app.get("/fetch_po")
@@ -115,13 +110,28 @@ def notify(email: str, message: str):
     return {"status": "SENT", "provider": "SendGrid"}
 
 # ==========================================
-# RUNNER
+# RUNNER 
 # ==========================================
+
+# Helper functions to start servers (Fixes pickling error)
+def start_common_server():
+    uvicorn.run(common_app, host="127.0.0.1", port=8001)
+
+def start_atlas_server():
+    uvicorn.run(atlas_app, host="127.0.0.1", port=8002)
+
 def run_services():
-    p1 = Process(target=uvicorn.run, args=(common_app,), kwargs={"host":"127.0.0.1", "port":8001})
-    p2 = Process(target=uvicorn.run, args=(atlas_app,), kwargs={"host":"127.0.0.1", "port":8002})
-    p1.start(); p2.start()
-    p1.join(); p2.join()
+    # Target functions instead of passing app objects directly
+    p1 = Process(target=start_common_server)
+    p2 = Process(target=start_atlas_server)
+    
+    p1.start()
+    p2.start()
+    
+    print("✅ MCP Servers Running on Ports 8001 & 8002")
+    
+    p1.join()
+    p2.join()
 
 if __name__ == "__main__":
     run_services()

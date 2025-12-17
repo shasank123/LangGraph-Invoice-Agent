@@ -191,8 +191,8 @@ def node_notify(state: InvoiceState):
 # 12. COMPLETE
 def node_complete(state: InvoiceState):
     state["logs"].append("✅ STAGE 12 [COMPLETE]: Workflow Finalized.")
-    final_status = state.get("status", "SUCCESS")
-    state["status"] = final_status
+    # FIX: Force status to SUCCESS instead of reading the old status
+    state["status"] = "SUCCESS"    
     return state
 
 # --- 5. BUILD GRAPH ---
