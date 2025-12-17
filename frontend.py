@@ -35,8 +35,8 @@ with st.sidebar:
 
     scenario = st.selectbox(
         "Choose Invoice File", 
-        ["good_invoice.pdf", "bad_invoice.pdf"],
-        help="Good = Matches PO ($5000). Bad = Mismatch ($5500)."
+        ["good_invoice.pdf", "bad_invoice.pdf", "receipt.png"],
+        help="Select 'receipt.png' to test Google Vision tool selection."
     )
 
     st.divider()

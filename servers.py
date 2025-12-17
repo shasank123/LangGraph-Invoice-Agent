@@ -81,10 +81,16 @@ atlas_app = FastAPI(title="ATLAS Server")
 @atlas_app.post("/ocr_extract")
 def ocr_extract(filename: str, tool: str = "google_vision"):
     time.sleep(1)
+    # Demo Logic: Filename dictates content
     if "good" in filename:
         return {"text": "INVOICE #001\nVENDOR: ACME CORP\nTOTAL: $5000.00"}
+    
     elif "bad" in filename:
         return {"text": "INVOICE #002\nVENDOR: ACME CORP\nTOTAL: $5500.00"}
+    
+    elif "receipt" in filename:
+        return {"text": "RECEIPT #999\nVENDOR: ACME CORP\nTOTAL: $1250.50"}
+        
     return {"text": "UNREADABLE"}
 
 @atlas_app.post("/enrich_vendor")
