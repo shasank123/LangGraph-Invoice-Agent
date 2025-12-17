@@ -87,7 +87,7 @@ def node_prepare(state: InvoiceState):
     vendor = state["extracted_data"].get("vendor", "unknown")
     tool = BigToolPicker.select("enrichment", context={"vendor": vendor})
     state["logs"].append(f"🛠️ STAGE 3: Selected '{tool}' for enrichment.")
-    
+
     # 2. Call the Mock Server
     profile = call_post(ATLAS_URL, "enrich_vendor", params={"vendor_name": vendor})
     state["vendor_profile"] = profile
@@ -108,7 +108,7 @@ def node_prepare(state: InvoiceState):
     
     if flags:
         state["logs"].append(f"   ⚠️ FLAGS DETECTED: {', '.join(flags)}")
-        
+
     return state
 
 def node_retrieve(state: InvoiceState):
