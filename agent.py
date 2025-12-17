@@ -124,6 +124,130 @@ def node_retrieve(state:InvoiceState):
         state["logs"].append("   -> No PO found.")
         return state
     
+# 5. MATCH_TWO_WAY
+def node_match(state:InvoiceState):
+    state["logs"].append("⚖️ STAGE 5 [MATCH]: Comparing Invoice vs PO...")
+    inv_amt = state["extracted_data"].get("amount", 0)   
+    po_amt = state["po_data"]["amount"] if state["po_data"] else 0
+    
+    match_res = call_post(COMMON_URL, "compute_match_score", json={"invoice_amount": inv_amt, "po_amount": po_amt})
+    state["match_score"] = match_res.get("score", 0)
+    state["logs"].append(f"  -> Match Score: {state['match_score']}")
+    return state
+
+# 6. CHECKPOINT_HITL
+def node_checkpoint_hitl(state:InvoiceState):
+    state["logs"].append("⏸️ STAGE 6 [CHECKPOINT]: Pausing for Human Review.")
+    state["review_url"] = f"http://internal-portal/review/{state['invoice_id']}"
+    # This node just sets up the state. The graph interrupt happens in the next transition
+    return state
+
+# 7. HITL_DECISION (Non-Deterministic)
+def node_hitl_decision(state:InvoiceState):
+    # This node calls 'interrupt' which halts execution until resume
+    state["logs"].append("👨‍💼 STAGE 7 [DECISION]: Waiting for user...")
+    decision = interrupt({
+        "msg": "Review Needed",
+        "score": state["match_score"],
+        "review": state.get("review_url")
+    })
+    # We resume here
+    action = decision.get("action")
+    note = decision.get("note", "")
+    state["logs"].append(f" -> User Decision: {action} {note}")
+
+    if action == "REJECT":
+        return Command(goto="COMPLETE", update={"status": "MANUAL_HANDLING"})
+    
+    # If ACCEPT, continue to RECONCILE
+    return state
+
+# 8. RECONCILE
+def node_reconcile(state:InvoiceState):
+    state["logs"].append("📘 STAGE 8 [RECONCILE]: Building Ledger Entries...")
+    res = call_post(COMMON_URL, "build_accounting_entries", params={"amount": state["extracted_data"]["amount"], "vendor": state["extracted_data"]["vendor"]})
+    state["accounting_entries"] = res.get("entries", [])
+    return state
+
+# 9. APPROVE
+def node_approve(state:InvoiceState):
+    state["logs"].append("🔄 STAGE 9 [APPROVE]: Applying Approval Policy...")
+    amt = state["extracted_data"]["amount"]
+    if amt > 10000:
+        state["approval_status"] = "ESCALATED_TO_CFO"
+    else:
+        state["approval_status"] = "AUTO_APPROVED"
+    state["logs"].append(f"   -> Policy: {state['approval_status']}")
+    return state
+
+# 10. POSTING
+def node_posting(state:InvoiceState):
+    state["logs"].append("🏃 STAGE 10 [POSTING]: Posting to ERP...")
+    res = call_post(ATLAS_URL, "post_to_erp", params={"invoice_id": state["invoice_id"]})
+    state["erp_txn_id"] = res.get("erp_txn_id")
+    return state
+
+# 11. NOTIFY
+def node_notify(state:InvoiceState):
+    state["logs"].append("✉️ STAGE 11 [NOTIFY]: Sending Emails...")
+    call_post(ATLAS_URL, "notify", params={"email": "vendor@acme.com", "message": "Paid"})
+    return state
+
+# 12. COMPLETE
+def node_complete(state:InvoiceState):
+    state["logs"].append("✅ STAGE 12 [COMPLETE]: Workflow Finalized.")
+    final_status = state.get("status", "SUCCESS")
+    state["status"] = final_status
+    return state
+
+# --- 5. BUILD GRAPH ---
+workflow = StateGraph(InvoiceState)
+
+# Add all 12 Nodes
+nodes= [
+    ("INTAKE", node_intake), ("UNDERSTAND", node_understand), ("PREPARE", node_prepare),
+    ("RETRIEVE", node_retrieve), ("MATCH_TWO_WAY", node_match), ("CHECKPOINT_HITL", node_checkpoint_hitl),
+    ("HITL_DECISION", node_hitl_decision), ("RECONCILE", node_reconcile), ("APPROVE", node_approve),
+    ("POSTING", node_posting), ("NOTIFY", node_notify), ("COMPLETE", node_complete)
+]
+
+for name, func in nodes:
+    workflow.add_node(name, func)
+
+# Linear flow 1-5 (Adding edges to workflow)
+workflow.add_edge(START, "INTAKE")
+workflow.add_edge("INTAKE", "UNDERSTAND")
+workflow.add_edge("UNDERSTAND", "PREPARE")
+workflow.add_edge("PREPARE", "RETRIEVE")
+workflow.add_edge("RETRIEVE", "MATCH_TWO_WAY")
+
+# Conditional Edge after Match
+def rounting_logic(state):
+    if state["match_score"] >= 0.90:
+        return "RECONCILE" # Skip HITL
+    return "CHECKPOINT_HITL"
+
+workflow.add_conditional_edges("MATCH_TWO_WAY", rounting_logic)
+
+# HITL Flow
+workflow.add_edge("CHECKPOINT_HITL", "HITL_DECISION")
+workflow.add_edge("HITL_DECISION", "RECONCILE") # If resumed (Reject handled inside node via Command)
+
+# Final Flow 8-12
+workflow.add_edge("RECONCILE", "APPROVE")
+workflow.add_edge("APPROVE", "POSTING")
+workflow.add_edge("POSTING", "NOTIFY")
+workflow.add_edge("NOTIFY", "COMPLETE")
+workflow.add_edge("COMPLETE", END)
+
+# Persistence
+checkpointer = MemorySaver()
+app_graph = workflow.compile(checkpointer=checkpointer)
+
+
+
+
+
 
     
 
