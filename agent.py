@@ -39,6 +39,7 @@ class InvoiceState(TypedDict):
     status: Annotated[str, replace]
     review_url: Annotated[Optional[str], replace]
     ai_analysis: Annotated[Optional[str], replace]
+    flags: Annotated[List[str], replace]
 
 # --- 2. BIGTOOL PICKER ---
 class BigToolPicker:
@@ -112,7 +113,27 @@ def node_prepare(state: InvoiceState):
     vendor = state["extracted_data"].get("vendor", "unknown")
     tool = BigToolPicker.select("enrichment", context={"vendor": vendor})
     state["logs"].append(f"🛠️ STAGE 3: AI selected '{tool}'")
-    state["vendor_profile"] = call_post(ATLAS_URL, "enrich_vendor", params={"vendor_name": vendor})
+    
+    # 2. Call the Mock Server
+    profile = call_post(ATLAS_URL, "enrich_vendor", params={"vendor_name": vendor})
+    state["vendor_profile"] = profile
+
+    # 3. COMPUTE FLAGS (The New Logic)
+    flags = []
+    score = profile.get("credit_score", 0)
+    
+    state["logs"].append(f"   -> Vendor Score: {score} ({profile.get('risk_level')})")
+
+    if score < 600:
+        flags.append("RISK_LOW_CREDIT_SCORE")
+    if profile.get("risk_level") == "HIGH":
+        flags.append("RISK_CATEGORY_HIGH")
+        
+    # Save flags to state
+    state["flags"] = flags
+    
+    if flags:
+        state["logs"].append(f"   ⚠️ FLAGS DETECTED: {', '.join(flags)}")
     return state
 
 def node_retrieve(state: InvoiceState):

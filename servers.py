@@ -4,6 +4,7 @@ import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from multiprocessing import Process
+import random
 
 # --- DATABASE SETUP ---
 def init_erp_db():
@@ -94,8 +95,24 @@ def ocr_extract(filename: str, tool: str = "google_vision"):
     return {"text": "UNREADABLE"}
 
 @atlas_app.post("/enrich_vendor")
-def enrich_vendor(vendor_name: str, tool: str = "clearbit"):
-    return {"tax_id": "US-99-99999", "credit_score": 850, "risk": "LOW"}
+def enrich_vendor(vendor_name: str):
+    time.sleep(0.5) # Simulate API latency
+    
+    # logic: "Bad" vendors get low scores for the demo
+    if "bad" in vendor_name.lower() or "unknown" in vendor_name.lower():
+        credit_score = 450
+        risk_level = "HIGH"
+    else:
+        credit_score = 780
+        risk_level = "LOW"
+
+    return {
+        "vendor": vendor_name,
+        "tax_id": f"US-{random.randint(10000, 99999)}",
+        "credit_score": credit_score,
+        "risk_level": risk_level,
+        "is_sanctioned": False
+    }
 
 @atlas_app.get("/fetch_po")
 def fetch_po(vendor: str):
