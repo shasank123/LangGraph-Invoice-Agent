@@ -88,6 +88,10 @@ with col1:
 # RIGHT COLUMN: STATE & INTERACTION
 with col2:
     st.subheader("⚙️ Agent State")
+
+    flags = st.session_state.data.get("flags", [])
+    if flags:
+        st.error(f"🚩 **RISK DETECTED:** {', '.join(flags)}")
     
     # Status Badge
     status_color = "green" if st.session_state.status in ["COMPLETED", "SUCCESS"] else "orange"
@@ -153,13 +157,13 @@ with col2:
         
         # Show Final Artifacts (Simulated)
         with st.expander("📂 View Final Output Payload"):
-            st.json({
-                "invoice_id": st.session_state.data.get("invoice_id"),
-                "final_status": "PAID",
-                "erp_transaction_id": st.session_state.data.get("erp_txn_id", "TXN-000"),
-                "approval_route": st.session_state.data.get("approval_status"),
-                "audit_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-            })
+            # Show the actual useful data
+            final_data = st.session_state.data
+            
+            # Filter out the huge logs list for a cleaner view
+            display_payload = {k: v for k, v in final_data.items() if k != "logs"}
+            
+            st.json(display_payload)
 
     # --- IDLE STATE ---
     else:
