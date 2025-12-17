@@ -1,43 +1,37 @@
 import httpx
-from typing import TypedDict, Optional, List, Any
+from typing import TypedDict, Optional, List, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
 from langgraph.checkpoint.memory import MemorySaver
 
-# --- 1. STATE DEFINITION ---
+# --- HELPER: REDUCER ---
+def replace(old_value, new_value):
+    return new_value
+
+# --- 1. STATE DEFINITION (Robust) ---
 class InvoiceState(TypedDict):
-    # Input
-    invoice_file: str
-    invoice_id: str
-    
-    # Stage Data
-    ocr_text: str
-    extracted_data: dict      # Amount, Vendor
-    vendor_profile: dict      # Enriched data
-    po_data: Optional[dict]   # ERP PO
-    match_score: float
-    accounting_entries: list
-    approval_status: str
-    erp_txn_id: str
+    invoice_file: Annotated[str, replace]
+    invoice_id: Annotated[str, replace]
+    ocr_text: Annotated[str, replace]
+    extracted_data: Annotated[dict, replace]
+    vendor_profile: Annotated[dict, replace]
+    po_data: Annotated[Optional[dict], replace]
+    match_score: Annotated[float, replace]
+    accounting_entries: Annotated[list, replace]
+    approval_status: Annotated[str, replace]
+    erp_txn_id: Annotated[str, replace]
+    logs: Annotated[List[str], replace]
+    status: Annotated[str, replace]
+    review_url: Annotated[Optional[str], replace]
 
-    # Workflow Metadata
-    logs: List[str]
-    status: str
-    review_url: Optional[str]
-
-# --- 2. BIGTOOL PICKER (Dynamic Tool Selection) ---
+# --- 2. BIGTOOL PICKER (Heuristic V1) ---
 class BigToolPicker:
     @staticmethod
     def select(capability: str, context: dict = None) -> str:
-        """
-        Selects a tool based on heuristics (simulating AI reasoning).
-        """
         context = context or {}
-        
         # 1. OCR Selection Logic
         if capability == "ocr":
             filename = context.get("filename", "").lower()
-            # Heuristic: Images need powerful Vision AI, PDFs use standard Textract
             if filename.endswith(".png") or filename.endswith(".jpg"):
                 return "google_vision"
             elif filename.endswith(".pdf"):
@@ -59,140 +53,125 @@ class BigToolPicker:
         
         return "default_tool"
 
-# --- 3. MCP CLIENT HELPERS ---
+# --- 3. HELPERS ---
 COMMON_URL = "http://127.0.0.1:8001"
 ATLAS_URL = "http://127.0.0.1:8002"
 
 def call_post(url, endpoint, json=None, params=None):
-    try:
-        return httpx.post(f"{url}/{endpoint}", json=json, params=params).json()
-    except:
-        return {}
+    try: return httpx.post(f"{url}/{endpoint}", json=json, params=params).json()
+    except: return {}
 
 def call_get(url, endpoint, params=None):
-    try:
-        return httpx.get(f"{url}/{endpoint}", params=params).json()
-    except:
-        return {}
-    
-# --- 4. THE 12 NODES ---
+    try: return httpx.get(f"{url}/{endpoint}", params=params).json()
+    except: return {}
 
-# 1. INTAKE
+# --- 4. NODES ---
+
 def node_intake(state: InvoiceState):
-    state['logs'].append(f"📥 STAGE 1 [INTAKE]: Validating schema for {state['invoice_file']}...")
+    state['logs'].append(f"📥 STAGE 1: Validating {state['invoice_file']}")
     if not state['invoice_file']: raise ValueError("Missing File")
     return state
 
-# 2. UNDERSTAND
 def node_understand(state: InvoiceState):
     tool = BigToolPicker.select("ocr", context={"filename": state["invoice_file"]})
-    state["logs"].append(f"🧠 STAGE 2 [UNDERSTAND]: OCR via {tool}")
-
-    # OCR
+    state["logs"].append(f"🧠 STAGE 2: Heuristic selected '{tool}'")
     ocr_res = call_post(ATLAS_URL, "ocr_extract", params={"filename": state["invoice_file"], "tool": tool})
     state["ocr_text"] = ocr_res.get("text", "")
-
-    # Parse
     parse_res = call_post(COMMON_URL, "parse_invoice", params={"text": state["ocr_text"]})
     state["extracted_data"] = parse_res
-    state["logs"].append(f"   -> Extracted: ${parse_res.get('amount')} from {parse_res.get('vendor')}")
+    state["logs"].append(f"   -> Extracted: ${parse_res.get('amount')}")
     return state
 
-# 3. PREPARE
 def node_prepare(state: InvoiceState):
-    tool = BigToolPicker.select("enrichment")
-    state["logs"].append(f"🛠️ STAGE 3 [PREPARE]: Enriching vendor via {tool}")
     vendor = state["extracted_data"].get("vendor", "unknown")
-    enrich_res = call_post(ATLAS_URL, "enrich_vendor", params={"vendor_name": vendor})
-    state["vendor_profile"] = enrich_res
+    tool = BigToolPicker.select("enrichment", context={"vendor": vendor})
+    state["logs"].append(f"🛠️ STAGE 3: Heuristic selected '{tool}'")
+    state["vendor_profile"] = call_post(ATLAS_URL, "enrich_vendor", params={"vendor_name": vendor})
     return state
 
-# 4. RETRIEVE
 def node_retrieve(state: InvoiceState):
-    state["logs"].append("📚 STAGE 4 [RETRIEVE]: Fetching POs from ERP...")
+    state["logs"].append("📚 STAGE 4: Fetching POs...")
     vendor = state["extracted_data"].get("vendor", "unknown")
-    
     po_res = call_get(ATLAS_URL, "fetch_po", params={"vendor": vendor})
     if po_res.get("found"):
         state["po_data"] = po_res
-        state["logs"].append(f"   -> Found PO: {po_res['po_number']} (${po_res['amount']})")
+        state["logs"].append(f"   -> Found PO: {po_res['po_number']}")
     else:
         state["po_data"] = None
         state["logs"].append("   -> No PO found.")
-
     return state
-    
-# 5. MATCH_TWO_WAY
+
 def node_match(state: InvoiceState):
-    state["logs"].append("⚖️ STAGE 5 [MATCH]: Comparing Invoice vs PO...")
+    state["logs"].append("⚖️ STAGE 5: Matching...")
     inv_amt = state["extracted_data"].get("amount", 0)   
     po_amt = state["po_data"]["amount"] if state["po_data"] else 0
-    
     match_res = call_post(COMMON_URL, "compute_match_score", json={"invoice_amount": inv_amt, "po_amount": po_amt})
     state["match_score"] = match_res.get("score", 0)
     state["logs"].append(f"   -> Match Score: {state['match_score']}")
     return state
 
-# 6. CHECKPOINT_HITL
 def node_checkpoint_hitl(state: InvoiceState):
-    state["logs"].append("⏸️ STAGE 6 [CHECKPOINT]: Pausing for Human Review.")
-    state["review_url"] = f"http://internal-portal/review/{state['invoice_id']}"
+    state["logs"].append("⏸️ STAGE 6: Pausing for Human Review.")
+    state["review_url"] = f"http://internal/review/{state['invoice_id']}"
     return state
 
-# 7. HITL_DECISION (Non-Deterministic)
 def node_hitl_decision(state: InvoiceState):
     state["logs"].append("👨‍💼 STAGE 7 [DECISION]: Waiting for user...")
     decision = interrupt({
         "msg": "Review Needed",
-        "score": state["match_score"],
-        "review": state.get("review_url")
+        "score": state["match_score"]
     })
     
     action = decision.get("action")
     note = decision.get("note", "")
-    state["logs"].append(f" -> User Decision: {action} {note}")
+    state["logs"].append(f" -> User Decision: {action} ({note})")
 
     if action == "REJECT":
-        return Command(goto="COMPLETE", update={"status": "MANUAL_HANDLING"})
+        state["status"] = "REJECTED"
+    else:
+        state["status"] = "APPROVED"
     
     return state
 
-# 8. RECONCILE
 def node_reconcile(state: InvoiceState):
-    state["logs"].append("📘 STAGE 8 [RECONCILE]: Building Ledger Entries...")
+    state["logs"].append("📘 STAGE 8: Reconciling...")
     res = call_post(COMMON_URL, "build_accounting_entries", params={"amount": state["extracted_data"]["amount"], "vendor": state["extracted_data"]["vendor"]})
     state["accounting_entries"] = res.get("entries", [])
     return state
 
-# 9. APPROVE
 def node_approve(state: InvoiceState):
-    state["logs"].append("🔄 STAGE 9 [APPROVE]: Applying Approval Policy...")
-    amt = state["extracted_data"]["amount"]
-    if amt > 10000:
-        state["approval_status"] = "ESCALATED_TO_CFO"
+    state["logs"].append("🔄 STAGE 9: Approving...")
+    # Logic: If status is already "APPROVED" (from HITL node), mark as HUMAN.
+    # Otherwise (if it came straight from Match), mark as AUTO.
+    
+    if state.get("status") == "APPROVED":
+        state["approval_status"] = "HUMAN_APPROVED"
     else:
         state["approval_status"] = "AUTO_APPROVED"
-    state["logs"].append(f"   -> Policy: {state['approval_status']}")
+        
+    state["logs"].append(f"   -> Final Decision: {state['approval_status']}")
     return state
 
-# 10. POSTING
 def node_posting(state: InvoiceState):
-    state["logs"].append("🏃 STAGE 10 [POSTING]: Posting to ERP...")
+    state["logs"].append("🏃 STAGE 10: Posting to ERP...")
     res = call_post(ATLAS_URL, "post_to_erp", params={"invoice_id": state["invoice_id"]})
-    state["erp_txn_id"] = res.get("erp_txn_id")
+
+    # DEBUG PRINT: Watch your terminal when this runs!
+    print(f"🔍 DEBUG: ERP Response for {state['invoice_id']}: {res}")
+
+    # Use a fallback if the ID is missing
+    state["erp_txn_id"] = res.get("erp_txn_id", "ERROR_MISSING_ID")
     return state
 
-# 11. NOTIFY
 def node_notify(state: InvoiceState):
-    state["logs"].append("✉️ STAGE 11 [NOTIFY]: Sending Emails...")
+    state["logs"].append("✉️ STAGE 11: Notifying...")
     call_post(ATLAS_URL, "notify", params={"email": "vendor@acme.com", "message": "Paid"})
     return state
 
-# 12. COMPLETE
 def node_complete(state: InvoiceState):
-    state["logs"].append("✅ STAGE 12 [COMPLETE]: Workflow Finalized.")
-    # FIX: Force status to SUCCESS instead of reading the old status
-    state["status"] = "SUCCESS"    
+    final_msg = "REJECTED" if state.get("status") == "REJECTED" else "SUCCESS"
+    state["logs"].append(f"✅ STAGE 12 [COMPLETE]: Workflow Finalized ({final_msg}).")
+    state["status"] = final_msg
     return state
 
 # --- 5. BUILD GRAPH ---
@@ -214,15 +193,22 @@ workflow.add_edge("UNDERSTAND", "PREPARE")
 workflow.add_edge("PREPARE", "RETRIEVE")
 workflow.add_edge("RETRIEVE", "MATCH_TWO_WAY")
 
-def routing_logic(state):
+def routing_match(state):
     if state["match_score"] >= 0.90:
         return "RECONCILE"
     return "CHECKPOINT_HITL"
 
-workflow.add_conditional_edges("MATCH_TWO_WAY", routing_logic)
+workflow.add_conditional_edges("MATCH_TWO_WAY", routing_match)
 
 workflow.add_edge("CHECKPOINT_HITL", "HITL_DECISION")
-workflow.add_edge("HITL_DECISION", "RECONCILE")
+
+# --- Conditional Router for HITL ---
+def routing_hitl(state):
+    if state["status"] == "REJECTED":
+        return "COMPLETE"
+    return "RECONCILE"
+
+workflow.add_conditional_edges("HITL_DECISION", routing_hitl)
 
 workflow.add_edge("RECONCILE", "APPROVE")
 workflow.add_edge("APPROVE", "POSTING")

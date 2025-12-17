@@ -103,7 +103,8 @@ def submit_decision(req:DecisionRequest):
             "resume_token": req.checkpoint_id,
             "next_stage": "COMPLETE",
             "status": final_status,
-            "logs": snapshot.values.get("logs", [])
+            "logs": snapshot.values.get("logs", []),
+            "state": snapshot.values
         }
     
     except Exception as e:
