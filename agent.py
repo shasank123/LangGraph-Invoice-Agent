@@ -177,13 +177,22 @@ def node_reconcile(state: InvoiceState):
 
 def node_approve(state: InvoiceState):
     state["logs"].append("🔄 STAGE 9: Approving...")
-    state["approval_status"] = "AUTO_APPROVED"
+    # Logic: If status is already "APPROVED" (from HITL node), mark as HUMAN.
+    # Otherwise (if it came straight from Match), mark as AUTO.
+    if state.get("status") == "APPROVED":
+        state["approval_status"] = "HUMAN_APPROVED"
+    else:
+        state["approval_status"] = "AUTO_APPROVED"
+        
+    state["logs"].append(f"   -> Final Decision: {state['approval_status']}")
     return state
 
 def node_posting(state: InvoiceState):
     state["logs"].append("🏃 STAGE 10: Posting to ERP...")
     res = call_post(ATLAS_URL, "post_to_erp", params={"invoice_id": state["invoice_id"]})
-    state["erp_txn_id"] = res.get("erp_txn_id")
+    # CAPTURE the ID (This is what was missing/empty before)
+    txn_id = res.get("erp_txn_id", "ERROR_NO_ID")
+    state["erp_txn_id"] = txn_id
     return state
 
 def node_notify(state: InvoiceState):

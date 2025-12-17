@@ -141,6 +141,8 @@ with col2:
                             res_json = resp.json()
                             st.session_state.logs = res_json["logs"]
                             st.session_state.status = res_json["status"]
+                            # CAPTURE THE NEW STATE 
+                            st.session_state.data = res_json.get("state", {})
                             st.rerun()
                         else:
                             st.error(f"Failed: {resp.text}")
