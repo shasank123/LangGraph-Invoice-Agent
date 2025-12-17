@@ -7,9 +7,12 @@ from multiprocessing import Process
 
 # --- DATABASE SETUP ---
 def init_erp_db():
-    conn = sqlite3.connect("erp_system_db")
+    conn = sqlite3.connect("erp_system.db") 
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS purchase_orders("po_number TEXT PRIMARY KEY, vendor TEXT, amount REAL, status TEXT")''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS purchase_orders
+                 (po_number TEXT PRIMARY KEY, vendor TEXT, amount REAL, status TEXT)''')
+    
     # Seeding Data
     data = [
         ("PO-1001", "ACME CORP", 5000.00, "APPROVED"),
@@ -17,15 +20,16 @@ def init_erp_db():
         ("PO-9999", "MEGA CORP", 10000.00, "APPROVED")
     ]
     c.executemany("INSERT OR IGNORE INTO purchase_orders VALUES(?,?,?,?)", data)
-    c.commit()
-    c.close()
+    
+    conn.commit() 
+    conn.close()
 
+# Initialize DB immediately
 init_erp_db()
 
 # ==========================================
 # SERVER 1: COMMON (Internal Logic) [Port 8001]
 # ==========================================
-
 common_app = FastAPI(title="COMMON Server")
 
 class MatchRequest(BaseModel):
@@ -46,9 +50,8 @@ def parse_invoice(text: str):
                     try:
                         extracted['amount'] = float(w.replace(',', ''))
                         break
-                    except:continue
-
-            except:pass
+                    except: continue
+            except: pass
 
         if "vendor" in lower:
             extracted['vendor'] = line.split(":")[-1].strip().upper()
@@ -65,7 +68,7 @@ def compute_match_score(req: MatchRequest):
     return {"score": round(score, 2)}
 
 @common_app.post("/build_accounting_entries")
-def build_acocunting_entries(amount: float, vendor: str):
+def build_accounting_entries(amount: float, vendor: str):
     return {
         "entries": [
             {"type": "DEBIT", "account": "EXPENSE_General", "amount": amount},
@@ -89,17 +92,17 @@ def ocr_extract(filename: str, tool: str = "google_vision"):
     return {"text": "UNREADABLE"}
 
 @atlas_app.post("/enrich_vendor")
-def enrich_vendor(vendor: str, tool: str = "clearbit"):
+def enrich_vendor(vendor_name: str, tool: str = "clearbit"):
     # Mock Enrichment
     return {"tax_id": "US-99-99999", "credit_score": 850, "risk": "LOW"}
 
-@atlas_app.post("/fetch_po")
+@atlas_app.get("/fetch_po")
 def fetch_po(vendor: str):
     conn = sqlite3.connect("erp_system.db")
     c = conn.cursor()
-    c.execute("SELECT * FROM purchase_orders WHERE vendor LIKE ?",(f"%{vendor}%",))
+    c.execute("SELECT * FROM purchase_orders WHERE vendor LIKE ?", (f"%{vendor}%",))
     row = c.fetchone()
-    c.close()
+    conn.close()
     if row: return {"po_number": row[0], "amount": row[2], "found": True}
     return {"found": False}
 
@@ -122,6 +125,3 @@ def run_services():
 
 if __name__ == "__main__":
     run_services()
-
-                    
-
